@@ -1,0 +1,125 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                                                                           ║
+║          📖 HOW TO USE THE CTF SCRAPER - SIMPLE GUIDE 📖                 ║
+║                                                                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+🎯 FOR https://ctf.0xfun.org/challenges SPECIFICALLY:
+
+═══════════════════════════════════════════════════════════════════════════
+
+OPTION 1: INTERACTIVE MODE (EASIEST!) ⭐
+
+  cd /Users/shoaib/Workspace/Projects/ctf_scrapper
+  source venv/bin/activate
+  python ctf_scraper_ultimate.py https://ctf.0xfun.org/challenges -i -v
+
+  What happens:
+    1. Tool detects you need authentication
+    2. Shows you cookie instructions
+    3. You paste your cookie
+    4. Everything downloads automatically!
+
+═══════════════════════════════════════════════════════════════════════════
+
+OPTION 2: WITH COOKIE DIRECTLY
+
+  Step 1: Get Your Cookie
+    • Go to https://ctf.0xfun.org in browser
+    • Login to your account
+    • Press F12 (Developer Tools)
+    • Go to "Application" tab
+    • Click "Cookies" → "ctf.0xfun.org"
+    • Find "session" cookie
+    • Copy the VALUE (long string)
+
+  Step 2: Run Tool
+    cd /Users/shoaib/Workspace/Projects/ctf_scrapper
+    source venv/bin/activate
+    python ctf_scraper_ultimate.py https://ctf.0xfun.org/challenges \
+      -c "session=PASTE_YOUR_COOKIE_HERE" \
+      -o test_run/0xfun_output \
+      -v
+
+═══════════════════════════════════════════════════════════════════════════
+
+FOR OTHER CTFs (TESTING IF COOKIE IS NEEDED):
+
+  Method 1 - Dry Run Test:
+    python ctf_scraper_ultimate.py <ANY_CTF_URL> --dry-run -v
+    
+    ✅ Works? → No cookie needed!
+    ❌ Fails? → Cookie needed!
+
+  Method 2 - Interactive (Always Works):
+    python ctf_scraper_ultimate.py <ANY_CTF_URL> -i
+    
+    Tool will ask for cookie ONLY if needed!
+
+═══════════════════════════════════════════════════════════════════════════
+
+COOKIE QUICK REFERENCE:
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │ WHEN DO I NEED A COOKIE?                                                │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ • Site requires login              → YES                                │
+  │ • Site has Cloudflare              → YES (like ctf.0xfun.org)          │
+  │ • Site shows "Just a moment..."    → YES                                │
+  │ • Site is public/educational       → NO                                 │
+  │ • Not sure?                        → Try -i mode!                       │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════
+
+TROUBLESHOOTING:
+
+  Problem: "403 Forbidden"
+    → You need to login and get cookie
+    → Run with: -i mode
+
+  Problem: "Cloudflare detected"
+    → MUST login first
+    → Get cookie from browser
+    → Use -c option
+
+  Problem: "No challenges found"
+    → Check URL is correct
+    → Try -i mode
+    → Use -v for more info
+
+═══════════════════════════════════════════════════════════════════════════
+
+QUICK COMMANDS CHEAT SHEET:
+
+  # Interactive mode (recommended for first time)
+  python ctf_scraper_ultimate.py <URL> -i
+
+  # With cookie
+  python ctf_scraper_ultimate.py <URL> -c "session=COOKIE"
+
+  # Dry run (preview only)
+  python ctf_scraper_ultimate.py <URL> --dry-run
+
+  # Verbose output
+  python ctf_scraper_ultimate.py <URL> -v
+
+  # Custom output directory
+  python ctf_scraper_ultimate.py <URL> -o /path/to/folder
+
+  # Everything combined
+  python ctf_scraper_ultimate.py <URL> -i -v -o ~/CTFs/my_ctf
+
+═══════════════════════════════════════════════════════════════════════════
+
+🎯 REMEMBER:
+
+  ✅ NOT all CTFs need cookies
+  ✅ ctf.0xfun.org DOES need cookies (Cloudflare)
+  ✅ Use -i mode when unsure
+  ✅ Tool will guide you!
+
+═══════════════════════════════════════════════════════════════════════════
+
+Happy hacking! 🚀🔐
+
