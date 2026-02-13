@@ -30,14 +30,29 @@ class CTFdScraper(BaseScraper):
         
         for endpoint in api_endpoints:
             try:
-                response = self.session.get(endpoint, timeout=10)
-                if response.status_code == 200:
+                self.log(f"Testing API endpoint: {endpoint}")
+                response = self.session.get(endpoint, timeout=10, allow_redirects=True)
+                
+                # Check if response is JSON
+                try:
                     data = response.json()
-                    if 'success' in data and data['success']:
+                except:
+                    continue
+                
+                # CTFd API returns success: true/false
+                if response.status_code == 200:
+                    if isinstance(data, dict) and data.get('success'):
                         self.api_base = endpoint.rsplit('/', 1)[0]
                         self.log(f"Found CTFd API at: {self.api_base}", "SUCCESS")
                         return True
-            except:
+                    # Some CTFd versions return data directly
+                    elif isinstance(data, dict) and 'data' in data:
+                        self.api_base = endpoint.rsplit('/', 1)[0]
+                        self.log(f"Found CTFd API at: {self.api_base}", "SUCCESS")
+                        return True
+                        
+            except Exception as e:
+                self.log(f"API endpoint test failed: {e}", "DEBUG")
                 continue
         
         return False

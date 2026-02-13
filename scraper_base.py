@@ -51,10 +51,19 @@ class BaseScraper:
         if token:
             self.session.headers.update({'Authorization': f'Bearer {token}'})
             
-        # Set a reasonable user agent
+        # Set a reasonable user agent to avoid bot detection
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
         })
+        
+        # Set timeout and retry strategy
+        self.timeout = 30
+        self.max_retries = 3
         
     def _parse_cookie(self, cookie_string: str) -> dict:
         """Parse cookie string into dict"""
@@ -115,40 +124,47 @@ class BaseScraper:
         return challenge_path
     
     def download_file(self, url: str, destination: Path, filename: Optional[str] = None) -> bool:
-        """Download a file from URL to destination"""
-        try:
-            if filename is None:
-                # Extract filename from URL or Content-Disposition header
-                filename = url.split('/')[-1].split('?')[0]
-            
-            filename = self.sanitize_filename(filename)
-            filepath = destination / filename
-            
-            self.log(f"Downloading: {url} -> {filepath}")
-            
-            response = self.session.get(url, stream=True, timeout=30)
-            response.raise_for_status()
-            
-            # Try to get filename from Content-Disposition header
-            if 'Content-Disposition' in response.headers:
-                cd = response.headers['Content-Disposition']
-                if 'filename=' in cd:
-                    filename_match = re.search(r'filename[^;=\n]*=(([\'"]).*?\2|[^;\n]*)', cd)
-                    if filename_match:
-                        filename = filename_match.group(1).strip('\'"')
-                        filepath = destination / self.sanitize_filename(filename)
-            
-            # Download file
-            with open(filepath, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            self.log(f"Downloaded: {filename}", "SUCCESS")
-            return True
-            
-        except Exception as e:
-            self.log(f"Failed to download {url}: {e}", "ERROR")
-            return False
+        """Download a file from URL to destination with retry logic"""
+        for attempt in range(self.max_retries):
+            try:
+                if filename is None:
+                    # Extract filename from URL or Content-Disposition header
+                    filename = url.split('/')[-1].split('?')[0]
+                
+                filename = self.sanitize_filename(filename)
+                filepath = destination / filename
+                
+                self.log(f"Downloading: {url} -> {filepath}")
+                
+                response = self.session.get(url, stream=True, timeout=self.timeout, allow_redirects=True)
+                response.raise_for_status()
+                
+                # Try to get filename from Content-Disposition header
+                if 'Content-Disposition' in response.headers:
+                    cd = response.headers['Content-Disposition']
+                    if 'filename=' in cd:
+                        filename_match = re.search(r'filename[^;=\n]*=(([\'"]).*?\2|[^;\n]*)', cd)
+                        if filename_match:
+                            filename = filename_match.group(1).strip('\'"')
+                            filepath = destination / self.sanitize_filename(filename)
+                
+                # Download file
+                with open(filepath, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                self.log(f"Downloaded: {filename}", "SUCCESS")
+                return True
+                
+            except Exception as e:
+                self.log(f"Download attempt {attempt + 1} failed: {e}", "WARNING")
+                if attempt < self.max_retries - 1:
+                    import time
+                    time.sleep(2 ** attempt)
+                else:
+                    self.log(f"Failed to download {url}: {e}", "ERROR")
+        
+        return False
     
     def save_statement(self, challenge_path: Path, statement: str):
         """Save challenge statement to text file"""
@@ -157,15 +173,40 @@ class BaseScraper:
             f.write(statement)
         self.log(f"Saved statement: {statement_file}")
     
-    def fetch_page(self, url: str) -> Optional[BeautifulSoup]:
-        """Fetch and parse a web page"""
-        try:
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-            return BeautifulSoup(response.text, 'lxml')
-        except Exception as e:
-            self.log(f"Failed to fetch {url}: {e}", "ERROR")
-            return None
+    def fetch_page(self, url: str, retries: int = None) -> Optional[BeautifulSoup]:
+        """Fetch and parse a web page with retry logic"""
+        if retries is None:
+            retries = self.max_retries
+            
+        last_error = None
+        for attempt in range(retries):
+            try:
+                self.log(f"Fetching {url} (attempt {attempt + 1}/{retries})")
+                response = self.session.get(url, timeout=self.timeout, allow_redirects=True)
+                response.raise_for_status()
+                return BeautifulSoup(response.text, 'lxml')
+            except requests.exceptions.HTTPError as e:
+                last_error = e
+                if e.response.status_code == 403:
+                    self.log(f"403 Forbidden - Authentication may be required", "WARNING")
+                elif e.response.status_code == 404:
+                    self.log(f"404 Not Found - URL may be incorrect", "ERROR")
+                    break
+                else:
+                    self.log(f"HTTP error {e.response.status_code}: {e}", "WARNING")
+            except requests.exceptions.Timeout:
+                last_error = Exception("Request timeout")
+                self.log(f"Request timeout (attempt {attempt + 1}/{retries})", "WARNING")
+            except Exception as e:
+                last_error = e
+                self.log(f"Error fetching page: {e}", "WARNING")
+            
+            if attempt < retries - 1:
+                import time
+                time.sleep(2 ** attempt)  # Exponential backoff
+        
+        self.log(f"Failed to fetch {url} after {retries} attempts: {last_error}", "ERROR")
+        return None
     
     def scrape(self) -> List[Challenge]:
         """
