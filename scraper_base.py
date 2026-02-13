@@ -184,11 +184,21 @@ class BaseScraper:
                 self.log(f"Fetching {url} (attempt {attempt + 1}/{retries})")
                 response = self.session.get(url, timeout=self.timeout, allow_redirects=True)
                 response.raise_for_status()
+                
+                # Check for Cloudflare challenge
+                if 'Just a moment' in response.text or 'cf-chl' in response.text:
+                    self.log("Cloudflare/bot protection detected - authentication required", "WARNING")
+                    return None
+                
                 return BeautifulSoup(response.text, 'lxml')
             except requests.exceptions.HTTPError as e:
                 last_error = e
                 if e.response.status_code == 403:
-                    self.log(f"403 Forbidden - Authentication may be required", "WARNING")
+                    # Check if it's Cloudflare
+                    if 'cloudflare' in e.response.text.lower() or 'cf-chl' in e.response.text:
+                        self.log(f"403 Forbidden - Cloudflare protection detected. Login required to get valid cookies.", "WARNING")
+                    else:
+                        self.log(f"403 Forbidden - Authentication required", "WARNING")
                 elif e.response.status_code == 404:
                     self.log(f"404 Not Found - URL may be incorrect", "ERROR")
                     break
