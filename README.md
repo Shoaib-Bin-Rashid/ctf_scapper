@@ -115,14 +115,20 @@ python3 ctf_scraper_ultimate.py \
   ./demo
 ```
 
-### Alternative Tools
+## 🛠️ Project Structure
 
-| Tool | Best For |
-|------|----------|
-| **`ctf_scraper_ultimate.py`** | 🌟 **Use this!** Works with all platforms |
-| `direct_scraper.py` | CTFd only, has interactive mode |
-| `picoctf_scraper.py` | picoCTF only (deprecated) |
-| `check_cookies.py` | Validate cookies before scraping |
+```
+ctf_scraper_ultimate.py     # The only tool you need!
+requirements.txt            # Dependencies
+README.md                   # This file
+README.bn.md                # বাংলা ডকুমেন্টেশন
+```
+
+**Documentation:**
+- [QUICKSTART.md](QUICKSTART.md) - Quick start guide
+- [QUICK_REFERENCE.txt](QUICK_REFERENCE.txt) - One-page cheat sheet  
+- [GET_FRESH_COOKIES.md](GET_FRESH_COOKIES.md) - Cookie extraction guide
+- [WHY_NOT_WORKING.md](WHY_NOT_WORKING.md) - Troubleshooting
 
 ---
 
