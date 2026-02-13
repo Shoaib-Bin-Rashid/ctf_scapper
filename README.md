@@ -87,13 +87,11 @@ python3 ctf_scraper_ultimate.py \
 
 ## 📖 Usage
 
-### The Ultimate Way (Recommended!)
-
 ```bash
 python3 ctf_scraper_ultimate.py "URL" "COOKIES" ./output
 ```
 
-**Real Examples:**
+### Real Examples
 
 ```bash
 # picoCTF - 439 challenges
@@ -102,7 +100,7 @@ python3 ctf_scraper_ultimate.py \
   "sessionid=XXX; csrftoken=YYY" \
   ./picoctf
 
-# 0xFun CTF - 67 challenges
+# 0xFun CTF - 67 challenges  
 python3 ctf_scraper_ultimate.py \
   "https://ctf.0xfun.org/challenges" \
   "session=XXX; cf_clearance=YYY" \
@@ -115,20 +113,58 @@ python3 ctf_scraper_ultimate.py \
   ./demo
 ```
 
-## 🛠️ Project Structure
+📖 **[Read the Quick Start Guide →](QUICKSTART.md)**
+
+---
+
+## 🔑 Getting Cookies
+
+**Method: Copy as cURL** (30 seconds)
+
+1. Login to CTF platform
+2. Press `F12` → **Network** tab
+3. Reload the page
+4. Right-click any request → **Copy** → **Copy as cURL**
+5. Extract cookies from `-b` flag:
+
+```bash
+curl 'https://ctf.0xfun.org/challenges' \
+  -b 'session=XXX; cf_clearance=YYY'
+     ↑_________________________↑
+     Copy this part
+```
+
+📖 **[Detailed Cookie Guide →](GET_FRESH_COOKIES.md)**
+
+---
+
+## ⚠️ Important
+
+- ✅ **ALWAYS quote the URL and cookies**
+- ✅ **Get fresh cookies** (< 5 min old)
+- ✅ **Login before** getting cookies
+
+### Common Issues
+
+| Issue | Fix |
+|-------|-----|
+| `zsh: no matches found` | Add quotes around URL |
+| `403 Forbidden` | Get fresh cookies |
+| Not working? | Check [GET_FRESH_COOKIES.md](GET_FRESH_COOKIES.md) |
+
+---
+
+## 🛠️ Project Files
 
 ```
-ctf_scraper_ultimate.py     # The only tool you need!
-requirements.txt            # Dependencies
+ctf_scraper_ultimate.py     # Main tool
 README.md                   # This file
 README.bn.md                # বাংলা ডকুমেন্টেশন
+QUICKSTART.md               # Quick start guide
+GET_FRESH_COOKIES.md        # Cookie extraction guide
+requirements.txt            # Dependencies
+LICENSE                     # MIT License
 ```
-
-**Documentation:**
-- [QUICKSTART.md](QUICKSTART.md) - Quick start guide
-- [QUICK_REFERENCE.txt](QUICK_REFERENCE.txt) - One-page cheat sheet  
-- [GET_FRESH_COOKIES.md](GET_FRESH_COOKIES.md) - Cookie extraction guide
-- [WHY_NOT_WORKING.md](WHY_NOT_WORKING.md) - Troubleshooting
 
 ---
 
@@ -143,114 +179,25 @@ output/
 │   └── XSS Challenge/
 │       └── challenge.txt
 ├── Crypto/
-│   └── RSA Baby/
-│       ├── challenge.txt
-│       └── public.pem
 ├── Pwn/
 ├── Reverse/
 └── Forensics/
 ```
 
-Each challenge folder contains:
-- `challenge.txt` - Full description, points, tags, author
-- Downloaded files (binaries, source code, etc.)
-
----
-
-## 🔑 Getting Cookies (Easy!)
-
-**Method: Copy as cURL** (30 seconds)
-
-1. Login to the CTF platform
-2. Press `F12` → **Network** tab
-3. Load the challenges page
-4. Right-click any request → **Copy** → **Copy as cURL**
-5. Find cookies after `-b`:
-
-```bash
-curl 'https://ctf.0xfun.org/challenges' \
-  -b 'session=XXX; cf_clearance=YYY'
-     ↑_________________________↑
-     Copy ONLY this part
-```
-
-6. Use immediately (cookies expire in 5-10 minutes!)
-
-📖 **[Detailed Cookie Guide →](GET_FRESH_COOKIES.md)**
-
----
-
-## 💡 Examples
-
-### Example 1: picoCTF
-
-```bash
-python3 ctf_scraper_ultimate.py \
-  "https://play.picoctf.org/practice" \
-  "sessionid=abc123...; csrftoken=xyz789..." \
-  ./picoctf_2024
-
-# ✅ Result: 439 challenges organized by category!
-```
-
-### Example 2: 0xFun CTF (Cloudflare Protected)
-
-```bash
-python3 ctf_scraper_ultimate.py \
-  "https://ctf.0xfun.org/challenges" \
-  "session=abc123...; cf_clearance=xyz789..." \
-  ./0xfun_ctf
-
-# ✅ Result: 67 challenges with files downloaded!
-```
-
-### Example 3: University CTF
-
-```bash
-python3 ctf_scraper_ultimate.py \
-  "https://university-ctf.edu/challenges" \
-  "session=abc123..." \
-  ./uni_ctf
-
-# ✅ Auto-detects CTFd and downloads everything!
-```
-
----
-
-## ⚠️ Important Notes
-
-### ✅ DO:
-- ✓ Quote the URL: `"https://..."`
-- ✓ Quote the cookies: `"session=XXX; cf_clearance=YYY"`
-- ✓ Get fresh cookies (< 5 minutes old)
-- ✓ Login before getting cookies
-
-### ❌ DON'T:
-- ✗ Forget quotes (shell will break!)
-- ✗ Use old cookies (they expire quickly)
-- ✗ Try to scrape without logging in
-
 ---
 
 ## 🔧 Troubleshooting
 
-| Issue | Fix |
-|-------|-----|
-| `zsh: no matches found` | Add quotes around URL |
-| `403 Forbidden` | Get fresh cookies |
-| `command not found` | Add quotes around cookies |
-| Tool not working | Read [WHY_NOT_WORKING.md](WHY_NOT_WORKING.md) |
+**Problem:** `zsh: no matches found`  
+**Solution:** Add quotes around URL
 
----
+**Problem:** `403 Forbidden`  
+**Solution:** Get fresh cookies (< 5 min old)
 
-## 📚 Documentation
+**Problem:** `command not found`  
+**Solution:** Add quotes around cookies
 
-- **[QUICK_REFERENCE.txt](QUICK_REFERENCE.txt)** - One-page cheat sheet
-- **[QUICKSTART.md](QUICKSTART.md)** - Step-by-step beginner guide  
-- **[GET_FRESH_COOKIES.md](GET_FRESH_COOKIES.md)** - How to get cookies
-- **[WHICH_SCRAPER_TO_USE.md](WHICH_SCRAPER_TO_USE.md)** - Platform guide
-- **[WHY_NOT_WORKING.md](WHY_NOT_WORKING.md)** - Troubleshooting
-- **[SUMMARY.md](SUMMARY.md)** - Complete overview
+📖 **More help:** [GET_FRESH_COOKIES.md](GET_FRESH_COOKIES.md)
 
 ---
 
