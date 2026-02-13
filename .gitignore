@@ -40,6 +40,12 @@ Thumbs.db
 ctf_challenges/
 downloads/
 output/
+*_ctf_download/
+0xfun_ctf_download/
+
+# Test files
+test/
+test_*.py
 
 # Config files with secrets
 config.yaml

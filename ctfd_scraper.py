@@ -31,7 +31,9 @@ class CTFdScraper(BaseScraper):
         for endpoint in api_endpoints:
             try:
                 self.log(f"Testing API endpoint: {endpoint}")
-                response = self.session.get(endpoint, timeout=10, allow_redirects=True)
+                # Add Referer header for Cloudflare
+                headers = {'Referer': self.url}
+                response = self.session.get(endpoint, timeout=30, allow_redirects=True, headers=headers)
                 
                 # Check if response is JSON
                 try:
@@ -61,9 +63,12 @@ class CTFdScraper(BaseScraper):
         """Scrape challenges using CTFd API"""
         challenges = []
         
+        # Add Referer header for Cloudflare
+        headers = {'Referer': self.url}
+        
         try:
             # Get challenges list
-            response = self.session.get(f"{self.api_base}/challenges")
+            response = self.session.get(f"{self.api_base}/challenges", headers=headers)
             response.raise_for_status()
             data = response.json()
             
@@ -81,7 +86,7 @@ class CTFdScraper(BaseScraper):
                 category = chall.get('category', 'Misc')
                 
                 # Get challenge details
-                detail_response = self.session.get(f"{self.api_base}/challenges/{chall_id}")
+                detail_response = self.session.get(f"{self.api_base}/challenges/{chall_id}", headers=headers)
                 if detail_response.status_code == 200:
                     detail_data = detail_response.json()
                     if detail_data.get('success'):

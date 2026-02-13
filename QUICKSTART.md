@@ -1,198 +1,151 @@
-# Quick Start Guide
+# 🚀 QUICK START GUIDE
 
-## Installation
+## ONE COMMAND FOR ALL CTF PLATFORMS! 
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Shoaib-Bin-Rashid/ctf_scapper.git
-   cd ctf_scapper
+```bash
+python3 ctf_scraper_ultimate.py "URL" "COOKIES" ./output
+```
+
+---
+
+## 📋 Step-by-Step
+
+### Step 1: Get Cookies (30 seconds)
+
+1. Open your browser and login to the CTF platform
+2. Press `F12` to open DevTools
+3. Go to **Network** tab
+4. Load the challenges page
+5. Right-click any request → **Copy** → **Copy as cURL**
+
+You'll see something like:
+```bash
+curl 'https://ctf.0xfun.org/challenges' \
+  -H 'accept: text/html...' \
+  -b 'session=abc123; cf_clearance=xyz789'
+     ↑_______________________________↑
+     Copy ONLY this part
+```
+
+### Step 2: Run the Scraper
+
+```bash
+python3 ctf_scraper_ultimate.py \
+  "https://ctf.0xfun.org/challenges" \
+  "session=abc123; cf_clearance=xyz789" \
+  ./my_ctf_output
+```
+
+### Step 3: Done! ✅
+
+Check your output folder - all challenges are organized by category!
+
+---
+
+## 💡 Real Examples
+
+### Example 1: 0xFun CTF
+
+```bash
+python3 ctf_scraper_ultimate.py \
+  "https://ctf.0xfun.org/challenges" \
+  "session=361efa74-78d6-41de-9259-8ec23fc7caaa.gZYiouxDqovVGIfeBOUlNpNg3CE; cf_clearance=t4GYXCrc48TbyUz7uhiMHirvtwIMgnZlG76Mngadi8M-1770991935-1.2.1.1" \
+  ./0xfun_ctf
+```
+
+### Example 2: picoCTF
+
+```bash
+python3 ctf_scraper_ultimate.py \
+  "https://play.picoctf.org/practice" \
+  "sessionid=93wmny7jqfeo6k3w8a50xq65mcr1g5jy; csrftoken=yK8PNkcgMzeR9A0Hi6HR5BLNW3iMN6cM" \
+  ./picoctf
+```
+
+### Example 3: Any CTFd Platform
+
+```bash
+python3 ctf_scraper_ultimate.py \
+  "https://demo.ctfd.io/challenges" \
+  "session=your_session_cookie_here" \
+  ./demo_ctf
+```
+
+---
+
+## ⚠️ Common Mistakes
+
+| ❌ Wrong | ✅ Correct |
+|---------|-----------|
+| Missing quotes around URL | `"https://site.com/challenges"` |
+| Missing quotes around cookies | `"session=XXX; cf_clearance=YYY"` |
+| Old/expired cookies | Get fresh cookies (< 5 min old) |
+| Not logged in | Login first, then get cookies |
+
+---
+
+## 🎯 What It Does
+
+1. **Auto-detects** platform type (CTFd, picoCTF, etc.)
+2. **Downloads** all challenge statements
+3. **Downloads** all challenge files
+4. **Organizes** into folders:
+   ```
+   output/
+   ├── Web/
+   │   ├── SQL Injection 101/
+   │   │   ├── challenge.txt
+   │   │   └── app.zip
+   │   └── XSS Challenge/
+   │       └── challenge.txt
+   ├── Crypto/
+   │   └── RSA Baby/
+   │       ├── challenge.txt
+   │       └── public.pem
+   └── Pwn/
+       └── Buffer Overflow/
+           ├── challenge.txt
+           └── binary
    ```
 
-2. **Set up virtual environment**
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+---
 
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+## 🔧 Troubleshooting
 
-## Basic Usage
-
-### Method 1: Using Python directly
+### "zsh: no matches found"
+→ You forgot to quote the URL! Add quotes:
 ```bash
-# Activate virtual environment first
-source venv/bin/activate
-
-# Run scraper
-python ctf_scraper.py https://ctf.example.com/challenges
+python3 ctf_scraper_ultimate.py "URL" "COOKIES" ./output
+                                  ↑   ↑
 ```
 
-### Method 2: Using bash wrapper
-```bash
-./scrape_ctf.sh https://ctf.example.com/challenges
-```
+### "403 Forbidden" errors
+→ Cookies expired! Get fresh cookies and try again immediately.
 
-## Common Scenarios
+### "command not found"
+→ You forgot to quote the cookies! They contain `;` characters.
 
-### 1. Public CTF (No Authentication)
-```bash
-python ctf_scraper.py https://ctf.example.com/challenges -v
-```
+---
 
-### 2. Authenticated CTF (with cookie)
-First, get your session cookie from browser:
-- Open DevTools (F12)
-- Go to Application/Storage → Cookies
-- Copy the session cookie value
-
-Then run:
-```bash
-python ctf_scraper.py https://ctf.example.com/challenges \
-  --cookie "session=your_cookie_value_here"
-```
-
-### 3. Preview Before Downloading (Dry Run)
-```bash
-python ctf_scraper.py https://ctf.example.com/challenges --dry-run
-```
-
-### 4. Custom Output Directory
-```bash
-python ctf_scraper.py https://ctf.example.com/challenges \
-  -o ~/Documents/CTFs/MyCompetition
-```
-
-### 5. Using Configuration File
-```bash
-# Copy example config
-cp config.example.yaml config.yaml
-
-# Edit config.yaml with your settings
-nano config.yaml
-
-# Run with config
-python ctf_scraper.py https://ctf.example.com/challenges --config config.yaml
-```
-
-## Output Structure
-
-After running, you'll get a organized folder structure:
-
-```
-ctf_challenges/
-└── 0xfun/                    # CTF name
-    ├── Pwn/
-    │   ├── buffer_overflow/
-    │   │   ├── statement.txt
-    │   │   └── files/
-    │   │       ├── vuln
-    │   │       └── libc.so.6
-    │   └── rop_chain/
-    │       ├── statement.txt
-    │       └── files/
-    ├── Web/
-    │   └── sql_injection/
-    │       ├── statement.txt
-    │       └── files/
-    ├── Crypto/
-    ├── Reverse/
-    ├── Misc/
-    └── Forensics/
-```
-
-## Troubleshooting
-
-### Issue: "403 Forbidden" error
-**Solution**: The CTF requires authentication. Use `--cookie` or `--token` option.
-
-### Issue: "No challenges found"
-**Solutions**:
-1. Check if you're on the correct URL (should be the challenges page)
-2. Try adding `-v` for verbose output to see what's happening
-3. The platform might not be supported - try `--platform generic`
-4. Check if authentication is required
-
-### Issue: Files not downloading
-**Solutions**:
-1. Check your internet connection
-2. Some files might require authentication
-3. Use `-v` to see which files are failing
-
-### Issue: Wrong categories
-**Solution**: Edit `config.yaml` to customize category keywords
-
-## Platform-Specific Tips
-
-### CTFd Platforms
-- Most common CTF platform
-- Usually auto-detected
-- API endpoint preferred (faster): `/api/v1/challenges`
-
-### Custom/Unknown Platforms
-Use generic scraper:
-```bash
-python ctf_scraper.py https://custom-ctf.com/challenges --platform generic -v
-```
-
-## Tips & Best Practices
-
-1. **Always test with dry-run first**
-   ```bash
-   python ctf_scraper.py <url> --dry-run
-   ```
-
-2. **Use verbose mode for debugging**
-   ```bash
-   python ctf_scraper.py <url> -v
-   ```
-
-3. **Organize by competition**
-   ```bash
-   python ctf_scraper.py <url> -o ~/CTFs/CompetitionName
-   ```
-
-4. **Keep your cookies secure**
-   - Don't commit `config.yaml` with cookies to git (it's in `.gitignore`)
-   - Use environment variables for sensitive data
-
-## Advanced Usage
-
-### Custom Category Mappings
-Edit `config.example.yaml` and add your own keywords:
-
-```yaml
-categories:
-  pwn:
-    - pwn
-    - binary
-    - custom_keyword
-```
-
-### Batch Scraping Multiple CTFs
-Create a script:
-```bash
-#!/bin/bash
-source venv/bin/activate
-
-python ctf_scraper.py https://ctf1.com/challenges -o ./CTF1
-python ctf_scraper.py https://ctf2.com/challenges -o ./CTF2
-python ctf_scraper.py https://ctf3.com/challenges -o ./CTF3
-```
-
-## Getting Help
+## 📚 Need More Help?
 
 ```bash
-python ctf_scraper.py --help
-./scrape_ctf.sh --help
+# Show help
+python3 ctf_scraper_ultimate.py --help
+
+# Read detailed guides
+cat GET_FRESH_COOKIES.md      # How to get cookies
+cat WHY_NOT_WORKING.md        # Troubleshooting guide
 ```
 
-## What's Next?
+---
 
-After scraping:
-1. Navigate to the challenge folder
-2. Read `statement.txt` for challenge description
-3. Work with files in the `files/` subdirectory
-4. Keep your solutions organized in the same folder structure
+## 🎉 That's It!
+
+**One tool. All platforms. Super simple.**
+
+```bash
+python3 ctf_scraper_ultimate.py "URL" "COOKIES" ./output
+```
+
+Happy hacking! 🚀
