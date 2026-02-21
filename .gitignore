@@ -3,21 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
 
 # Virtual environments
@@ -36,18 +24,22 @@ env/
 .DS_Store
 Thumbs.db
 
-# CTF downloads
-ctf_challenges/
-downloads/
+# CTF scraped output (any folder created by the tool)
 output/
+*_ctf/
+*_output/
 *_ctf_download/
-0xfun_ctf_download/
 
-# Test files
-test/
-test_*.py
-
-# Config files with secrets
+# Cookies / secrets
+cookie.txt
+cookies.txt
+*.secret
 config.yaml
 secrets.yaml
-*.secret
+
+# Scraper state files
+.scraper_state.json
+
+# Backups
+*.backup
+*_backup.py
