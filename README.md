@@ -2,7 +2,7 @@
 
 # 🎯 Ultimate CTF Scraper
 
-<img src="https://img.shields.io/badge/version-2.0.0-blue?style=for-the-badge" /> <img src="https://img.shields.io/badge/python-3.8+-blue?style=for-the-badge&logo=python&logoColor=white" /> <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" /> <img src="https://img.shields.io/badge/platforms-CTFd%20%7C%20picoCTF%20%7C%20Universal-purple?style=for-the-badge" /> <img src="https://img.shields.io/github/actions/workflow/status/Shoaib-Bin-Rashid/ctf_scrapper/test.yml?style=for-the-badge&label=tests" />
+<img src="https://img.shields.io/badge/version-2.1.0-blue?style=for-the-badge" /> <img src="https://img.shields.io/badge/python-3.8+-blue?style=for-the-badge&logo=python&logoColor=white" /> <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" /> <img src="https://img.shields.io/badge/platforms-CTFd%20%7C%20picoCTF%20%7C%20rCTF%20%7C%20Mellivora-purple?style=for-the-badge" /> <img src="https://img.shields.io/github/actions/workflow/status/Shoaib-Bin-Rashid/ctf_scrapper/test.yml?style=for-the-badge&label=tests" />
 
 **One universal tool to download and organize all CTF challenges automatically.**
 
@@ -99,6 +99,7 @@ Positional:
 
 Options:
   -c, --cookies         Cookie string or @file.txt
+  -t, --token           Bearer token (for rCTF, HTB-style platforms)
   --browser             Browser fallback mode (manual login, no cookies needed)
   --dry-run             Preview challenges without downloading
   --skip-existing       Skip already downloaded challenges (resume)
@@ -130,6 +131,24 @@ python3 ctf_scraper.py \
   "https://play.picoctf.org/practice" \
   -c "sessionid=93wmny7j...; csrftoken=yK8PNkcg..." \
   ./picoctf
+```
+
+### rCTF (Bearer token)
+
+```bash
+python3 ctf_scraper.py \
+  "https://ctf.redpwn.net" \
+  -t "your_rctf_api_token" \
+  ./redpwn_ctf
+```
+
+### Mellivora Platform
+
+```bash
+python3 ctf_scraper.py \
+  "https://ctf.example.eu" \
+  -c "PHPSESSID=abc123..." \
+  ./output
 ```
 
 ### Browser Mode (any platform, no cookies)
@@ -167,6 +186,7 @@ python3 ctf_scraper.py "URL" -c "COOKIES" --max-workers 10 ./output
 ```
 output/
 ├── .scraper_state.json      ← resume state (auto-created)
+├── index.json               ← full manifest with all challenge metadata
 ├── Web/
 │   ├── SQL Injection 101/
 │   │   ├── challenge.txt    ← name, points, description, tags
@@ -195,6 +215,8 @@ output/
 |----------|--------|-------|
 | **CTFd** | ✅ Full | 0xFun, HackTheBox CTF, BitSkrieg, custom instances |
 | **picoCTF** | ✅ Full | 439+ challenges tested |
+| **rCTF** | ✅ Full | redpwn, utctf, irisctf, squarectf — needs `--token` |
+| **Mellivora** | ✅ Full | Used by several EU CTFs |
 | **Any Platform** | ✅ Browser Mode | Works with CAPTCHA, 2FA, SSO |
 
 ---
@@ -212,6 +234,9 @@ output/
 
 **`playwright` not found**
 → Run `playwright install chromium`
+
+**rCTF `badToken` error**
+→ You need a Bearer token. Log in to the rCTF platform, copy it from your profile, and use `--token YOUR_TOKEN`.
 
 **Platform not detected / empty output**
 → Try `--browser` mode for manual login.

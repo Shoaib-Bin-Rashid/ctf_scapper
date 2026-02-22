@@ -51,7 +51,7 @@ import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 # Build a platform-appropriate User-Agent at import time
 _OS_UA = {
@@ -83,6 +83,13 @@ class RateLimiter:
             if wait > 0:
                 time.sleep(wait)
             self._last_call = time.monotonic()
+
+
+def _html_to_text(raw: str) -> str:
+    """Convert an HTML string to clean plain text, or return raw if not HTML."""
+    if not raw or '<' not in raw:
+        return raw
+    return BeautifulSoup(raw, 'lxml').get_text(separator='\n', strip=True)
 
 
 class ScraperState:
@@ -143,10 +150,10 @@ class ScraperState:
 
 
 class UniversalCTFScraper:
-    def __init__(self, url: str, cookies_str: Optional[str], output_dir: str,
+    def __init__(self, url: str, cookies_str: Optional[str] = None, output_dir: str = "./output",
                  skip_existing: bool = False, dry_run: bool = False,
                  max_workers: int = 5, timeout: int = 30, verbose: bool = False,
-                 rate_limit: float = 0.0):
+                 rate_limit: float = 0.0, token: Optional[str] = None):
         self.url = url
         self.output_dir = Path(output_dir)
         self.skip_existing = skip_existing
@@ -189,6 +196,10 @@ class UniversalCTFScraper:
             'Referer': self.base_url,
         })
 
+        # Bearer token auth (rCTF, HTB, etc.)
+        if token:
+            self.session.headers['Authorization'] = f'Bearer {token}'
+
         # Rate limiter (0 = disabled)
         self._rate_limiter = RateLimiter(rate_limit)
         
@@ -197,7 +208,7 @@ class UniversalCTFScraper:
         
         # Thread safety for stats and state
         self._lock = threading.Lock()
-        
+
         # Statistics
         self.stats = {
             'total': 0,
@@ -207,6 +218,23 @@ class UniversalCTFScraper:
             'downloaded_files': 0,
             'failed_files': 0
         }
+
+        # JSON manifest — collects every processed challenge for index.json
+        self._manifest: List[Dict] = []
+
+    def _save_json_manifest(self) -> None:
+        """Write index.json to the output root — machine-readable challenge list."""
+        manifest_path = self.output_dir / 'index.json'
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                'version': __version__,
+                'platform': self.state.state.get('platform', 'unknown'),
+                'url': self.url,
+                'scraped_at': datetime.now().isoformat(),
+                'total': len(self._manifest),
+                'challenges': self._manifest
+            }, f, indent=2, ensure_ascii=False)
+        self.logger.info(f"📄 Manifest written → {manifest_path}")
     
     def _parse_cookies(self, cookies_str: str) -> Dict[str, str]:
         """Parse cookies from string, file, or environment variable"""
@@ -231,41 +259,64 @@ class UniversalCTFScraper:
         return cookies
     
     def detect_platform(self) -> str:
-        """Auto-detect the platform type"""
+        """Auto-detect the CTF platform by probing known API fingerprints."""
         self.logger.info(f"🔍 Detecting platform type for {self.domain}...")
-        
-        # Check for picoCTF
+
+        # ── Domain shortcuts ──────────────────────────────────────────────────
         if 'picoctf' in self.domain.lower():
-            self.logger.info("✅ Detected: picoCTF platform")
+            self.logger.info("✅ Detected: picoCTF")
             return 'picoctf'
-        
-        # Check for CTFd by trying the API endpoint
+
+        # ── rCTF  (/api/v1/challs → {"kind":"goodChallenge",...}) ────────────
         try:
-            api_url = urljoin(self.base_url, '/api/v1/challenges')
-            resp = self.session.get(api_url, timeout=self.timeout)
-            if resp.status_code == 200:
-                # Ensure we have content before trying to parse JSON
-                if resp.content:
-                    data = resp.json()
-                    if 'success' in data or 'data' in data:
-                        self.logger.info("✅ Detected: CTFd platform")
-                        return 'ctfd'
-        except requests.exceptions.RequestException as e:
-            self.logger.debug(f"CTFd detection failed (network): {e}")
-        except json.JSONDecodeError as e:
-            self.logger.debug(f"CTFd detection failed (json): {e}")
-        
-        # Check for picoCTF API even if domain doesn't match
+            resp = self.session.get(
+                urljoin(self.base_url, '/api/v1/challs'), timeout=self.timeout)
+            if resp.status_code == 200 and resp.content:
+                data = resp.json()
+                if isinstance(data, dict) and data.get('kind') in (
+                        'goodChallenge', 'badToken', 'goodChallenges'):
+                    self.logger.info("✅ Detected: rCTF platform")
+                    return 'rctf'
+        except Exception as e:
+            self.logger.debug(f"rCTF probe failed: {e}")
+
+        # ── CTFd  (/api/v1/challenges → {"success":true,"data":[...]}) ────────
         try:
-            api_url = urljoin(self.base_url, '/api/challenges')
-            resp = self.session.get(api_url, timeout=self.timeout)
-            if resp.status_code == 200 and isinstance(resp.json(), (list, dict)):
-                self.logger.info("✅ Detected: picoCTF-style platform")
-                return 'picoctf'
-        except Exception:
-            pass
-        
-        self.logger.warning("⚠️  Platform type unknown - will try browser fallback")
+            resp = self.session.get(
+                urljoin(self.base_url, '/api/v1/challenges'), timeout=self.timeout)
+            if resp.status_code == 200 and resp.content:
+                data = resp.json()
+                if isinstance(data, dict) and ('success' in data or 'data' in data):
+                    self.logger.info("✅ Detected: CTFd platform")
+                    return 'ctfd'
+        except Exception as e:
+            self.logger.debug(f"CTFd probe failed: {e}")
+
+        # ── picoCTF-style  (/api/challenges/ → paginated list) ───────────────
+        try:
+            resp = self.session.get(
+                urljoin(self.base_url, '/api/challenges/'), timeout=self.timeout)
+            if resp.status_code == 200 and resp.content:
+                data = resp.json()
+                if isinstance(data, (list, dict)):
+                    self.logger.info("✅ Detected: picoCTF-style platform")
+                    return 'picoctf'
+        except Exception as e:
+            self.logger.debug(f"picoCTF probe failed: {e}")
+
+        # ── Mellivora  (/api/challenges.php → JSON array) ─────────────────────
+        try:
+            resp = self.session.get(
+                urljoin(self.base_url, '/api/challenges.php'), timeout=self.timeout)
+            if resp.status_code == 200 and resp.content:
+                data = resp.json()
+                if isinstance(data, list) and data and 'title' in data[0]:
+                    self.logger.info("✅ Detected: Mellivora platform")
+                    return 'mellivora'
+        except Exception as e:
+            self.logger.debug(f"Mellivora probe failed: {e}")
+
+        self.logger.warning("⚠️  Platform unknown — use --browser for manual login")
         return 'unknown'
     
     def scrape_ctfd(self) -> bool:
@@ -314,8 +365,9 @@ class UniversalCTFScraper:
                             pbar.update(1)
             
             self._print_summary()
+            self._save_json_manifest()
             return True
-            
+
         except requests.exceptions.RequestException as e:
             self.logger.error(f"❌ Network error: {e}")
             return False
@@ -478,20 +530,39 @@ class UniversalCTFScraper:
             self.logger.error(f"     ✗ Failed to download {file_name}: {e}")
             return False
     
-    def _save_challenge_info(self, folder: Path, info: Dict):
-        """Save challenge information to file"""
+    def _save_challenge_info(self, folder: Path, info: Dict) -> None:
+        """Save challenge information as plain text, with HTML stripped from description."""
+        description = _html_to_text(info.get('description', ''))
         with open(folder / 'challenge.txt', 'w', encoding='utf-8') as f:
-            f.write(f"Challenge: {info['name']}\n")
-            f.write(f"Category: {info['category']}\n")
-            f.write(f"Points: {info['points']}\n")
-            f.write(f"Solves: {info['solves']}\n")
-            if info['tags']:
-                f.write(f"Tags: {', '.join(info['tags'])}\n")
-            f.write(f"\nDescription:\n{info['description']}\n")
-            if info['files']:
-                f.write(f"\nFiles:\n")
-                for file_url in info['files']:
+            f.write(f"Challenge : {info['name']}\n")
+            f.write(f"Category  : {info['category']}\n")
+            f.write(f"Points    : {info.get('points', 'N/A')}\n")
+            f.write(f"Solves    : {info.get('solves', 'N/A')}\n")
+            if info.get('author'):
+                f.write(f"Author    : {info['author']}\n")
+            tags = info.get('tags', [])
+            if tags:
+                f.write(f"Tags      : {', '.join(tags)}\n")
+            f.write(f"\n{'='*60}\nDESCRIPTION\n{'='*60}\n{description}\n")
+            files = info.get('files', [])
+            if files:
+                f.write(f"\n{'='*60}\nFILES\n{'='*60}\n")
+                for file_url in files:
                     f.write(f"  - {file_url}\n")
+
+        # Append to in-memory manifest
+        with self._lock:
+            self._manifest.append({
+                'name':        info['name'],
+                'category':    info['category'],
+                'points':      info.get('points', 0),
+                'solves':      info.get('solves', 0),
+                'author':      info.get('author', ''),
+                'tags':        info.get('tags', []),
+                'description': description,
+                'files':       info.get('files', []),
+                'folder':      str(folder.relative_to(self.output_dir)),
+            })
     
     def scrape_picoctf(self) -> bool:
         """Scrape picoCTF platform"""
@@ -569,6 +640,7 @@ class UniversalCTFScraper:
                         pbar.update(1)
 
         self._print_summary()
+        self._save_json_manifest()
         return True
 
     def _fetch_picoctf_page(self, page_num: int) -> Tuple[int, List[Dict]]:
@@ -728,17 +800,214 @@ class UniversalCTFScraper:
         print(f"{'='*60}")
         print(f"📂 Output: {self.output_dir}")
     
+    def scrape_rctf(self) -> bool:
+        """Scrape an rCTF-based platform (redpwn framework)."""
+        self.logger.info(f"\n🎯 Scraping rCTF platform: {self.domain}")
+        print("=" * 60)
+
+        try:
+            resp = self.session.get(
+                urljoin(self.base_url, '/api/v1/challs'), timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+
+            if data.get('kind') == 'badToken':
+                self.logger.error(
+                    "❌ rCTF: bad/missing token. Provide with --token <your_token>")
+                return False
+
+            challenges = data.get('data', [])
+            self.stats['total'] = len(challenges)
+            self.logger.info(f"📦 Found {len(challenges)} challenges\n")
+
+            if self.dry_run:
+                for chal in challenges[:10]:
+                    print(f"  • {chal.get('name')} ({chal.get('category', 'Misc')})")
+                if len(challenges) > 10:
+                    print(f"  ... and {len(challenges) - 10} more")
+                return True
+
+            with tqdm(total=len(challenges), desc="Progress", unit="chal", dynamic_ncols=True) as pbar:
+                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    futures = {
+                        executor.submit(self._process_rctf_challenge, c): c
+                        for c in challenges
+                    }
+                    for future in as_completed(futures):
+                        result = future.result()
+                        with self._lock:
+                            if result:
+                                self.stats['success'] += 1
+                            else:
+                                self.stats['failed'] += 1
+                        pbar.update(1)
+
+            self._print_summary()
+            self._save_json_manifest()
+            return True
+
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"❌ Network error: {e}")
+            return False
+        except Exception as e:
+            self.logger.error(f"❌ Error scraping rCTF: {e}", exc_info=True)
+            return False
+
+    def _process_rctf_challenge(self, challenge: Dict) -> bool:
+        """Process a single rCTF challenge."""
+        try:
+            chal_id = str(challenge.get('id', challenge.get('name', 'unknown')))
+            name     = challenge.get('name', 'Unknown')
+            category = challenge.get('category', 'Misc')
+
+            if self.skip_existing and self.state.is_completed(chal_id):
+                with self._lock:
+                    self.stats['skipped'] += 1
+                return True
+
+            self.logger.info(f"📥 Processing: {name} ({category})")
+
+            category_folder   = self.output_dir / self._sanitize_filename(category)
+            challenge_folder  = category_folder / self._sanitize_filename(name)
+            challenge_folder.mkdir(parents=True, exist_ok=True)
+
+            # rCTF files: [{"name":"chall.zip","url":"https://..."}]
+            raw_files = challenge.get('files', [])
+            file_urls = [f['url'] for f in raw_files if 'url' in f]
+            file_names = [f.get('name', f['url'].split('/')[-1]) for f in raw_files if 'url' in f]
+
+            self._save_challenge_info(challenge_folder, {
+                'name':        name,
+                'category':    category,
+                'description': challenge.get('description', ''),
+                'points':      challenge.get('points', 0),
+                'solves':      challenge.get('solves', 0),
+                'author':      challenge.get('author', ''),
+                'tags':        challenge.get('tags', []),
+                'files':       file_urls,
+            })
+
+            if file_urls:
+                self._download_files_concurrent(file_urls, challenge_folder)
+
+            with self._lock:
+                self.state.mark_completed(chal_id)
+            self.logger.info(f"  ✅ Saved to {challenge_folder}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"  ❌ Error processing {challenge.get('name')}: {e}", exc_info=True)
+            if 'chal_id' in locals():
+                with self._lock:
+                    self.state.mark_failed(chal_id)
+            return False
+
+    def scrape_mellivora(self) -> bool:
+        """Scrape a Mellivora-based CTF platform."""
+        self.logger.info(f"\n🎯 Scraping Mellivora platform: {self.domain}")
+        print("=" * 60)
+
+        try:
+            resp = self.session.get(
+                urljoin(self.base_url, '/api/challenges.php'), timeout=self.timeout)
+            resp.raise_for_status()
+            challenges = resp.json()
+
+            if not isinstance(challenges, list):
+                self.logger.error("❌ Unexpected Mellivora response format")
+                return False
+
+            self.stats['total'] = len(challenges)
+            self.logger.info(f"📦 Found {len(challenges)} challenges\n")
+
+            if self.dry_run:
+                for chal in challenges[:10]:
+                    print(f"  • {chal.get('title')} ({chal.get('category', 'Misc')})")
+                if len(challenges) > 10:
+                    print(f"  ... and {len(challenges) - 10} more")
+                return True
+
+            with tqdm(total=len(challenges), desc="Progress", unit="chal", dynamic_ncols=True) as pbar:
+                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    futures = {
+                        executor.submit(self._process_mellivora_challenge, c): c
+                        for c in challenges
+                    }
+                    for future in as_completed(futures):
+                        result = future.result()
+                        with self._lock:
+                            if result:
+                                self.stats['success'] += 1
+                            else:
+                                self.stats['failed'] += 1
+                        pbar.update(1)
+
+            self._print_summary()
+            self._save_json_manifest()
+            return True
+
+        except Exception as e:
+            self.logger.error(f"❌ Error scraping Mellivora: {e}", exc_info=True)
+            return False
+
+    def _process_mellivora_challenge(self, challenge: Dict) -> bool:
+        """Process a single Mellivora challenge."""
+        try:
+            chal_id  = str(challenge.get('id', challenge.get('title', 'unknown')))
+            name     = challenge.get('title', 'Unknown')
+            category = challenge.get('category', 'Misc')
+
+            if self.skip_existing and self.state.is_completed(chal_id):
+                with self._lock:
+                    self.stats['skipped'] += 1
+                return True
+
+            self.logger.info(f"📥 Processing: {name} ({category})")
+
+            challenge_folder = (
+                self.output_dir / self._sanitize_filename(category)
+                / self._sanitize_filename(name)
+            )
+            challenge_folder.mkdir(parents=True, exist_ok=True)
+
+            self._save_challenge_info(challenge_folder, {
+                'name':        name,
+                'category':    category,
+                'description': challenge.get('description', ''),
+                'points':      challenge.get('points', 0),
+                'solves':      challenge.get('solves', challenge.get('num_solutions', 0)),
+                'author':      challenge.get('author', ''),
+                'tags':        [],
+                'files':       [],
+            })
+
+            with self._lock:
+                self.state.mark_completed(chal_id)
+            self.logger.info(f"  ✅ Saved to {challenge_folder}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"  ❌ Error: {e}", exc_info=True)
+            return False
+
     def scrape(self) -> bool:
-        """Main scraping method - auto-detects and scrapes"""
+        """Main scraping method — auto-detects platform and scrapes."""
         platform = self.detect_platform()
         self.state.state['platform'] = platform
-        
-        if platform == 'ctfd':
-            return self.scrape_ctfd()
-        elif platform == 'picoctf':
-            return self.scrape_picoctf()
-        else:
-            return False
+
+        dispatch = {
+            'ctfd':      self.scrape_ctfd,
+            'picoctf':   self.scrape_picoctf,
+            'rctf':      self.scrape_rctf,
+            'mellivora': self.scrape_mellivora,
+        }
+
+        if platform in dispatch:
+            return dispatch[platform]()
+
+        self.logger.error(
+            "❌ Platform not recognized. Try --browser for manual login.")
+        return False
     
     @staticmethod
     def _sanitize_filename(filename: str) -> str:
@@ -1023,21 +1292,28 @@ Getting Cookies (EASIEST METHOD ⭐):
   3. Click Cookie Editor icon → Export → "Header String"
   4. Use with -c flag: -c "session=xxx; cf_clearance=yyy"
 
+Supported platforms (auto-detected):
+  CTFd      → most CTFs (0xFun, BitSkrieg, HackTheBox CTF, ...)
+  picoCTF   → play.picoctf.org
+  rCTF      → redpwn, utctf, irisctf, squarectf, ... (needs --token)
+  Mellivora → some EU CTFs
+  Any       → use --browser for manual login
+
 Examples:
-  # Cookie Editor method (easiest)
-  %(prog)s "https://ctf.example.com/challenges" -c "session=XXX; cf_clearance=YYY" ./output
+  # CTFd (Cookie Editor method)
+  %(prog)s "https://ctf.example.com/challenges" -c "session=XXX" ./output
+
+  # rCTF with Bearer token
+  %(prog)s "https://ctf.redpwn.net" -t "your_rctf_token" ./output
 
   # Environment variable (most secure)
   export CTF_COOKIES="session=XXX; cf_clearance=YYY"
   %(prog)s "https://ctf.0xfun.org/challenges" ./output
 
-  # Cookie file
-  %(prog)s "https://ctf.example.com/challenges" -c @cookies.txt ./output
-
-  # Browser fallback (no cookies needed, manual login)
+  # Browser fallback (any platform, no cookies needed)
   %(prog)s --browser "https://ctf.example.com" ./output
 
-  # Dry run (preview without downloading)
+  # Dry run — preview challenges without downloading
   %(prog)s "URL" -c "COOKIES" --dry-run ./output
 
   # Resume interrupted download
@@ -1051,6 +1327,7 @@ Examples:
     parser.add_argument('url', nargs='?', help='CTF platform URL')
     parser.add_argument('output_dir', nargs='?', default='./output', help='Output directory (default: ./output)')
     parser.add_argument('-c', '--cookies', help='Cookies string or @file.txt')
+    parser.add_argument('-t', '--token',   help='Bearer token (for rCTF, HTB-style platforms)')
     parser.add_argument('--browser', action='store_true', help='Use browser fallback mode')
     parser.add_argument('--dry-run', action='store_true', help='Preview challenges without downloading')
     parser.add_argument('--skip-existing', action='store_true', help='Skip already downloaded challenges')
@@ -1099,6 +1376,7 @@ Examples:
             timeout=args.timeout,
             verbose=args.verbose,
             rate_limit=args.rate_limit,
+            token=args.token,
         )
 
         success = scraper.scrape()
