@@ -2,7 +2,7 @@
 
 # 🎯 Ultimate CTF Scraper
 
-<img src="https://img.shields.io/badge/version-2.0-blue?style=for-the-badge" /> <img src="https://img.shields.io/badge/python-3.8+-blue?style=for-the-badge&logo=python&logoColor=white" /> <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" /> <img src="https://img.shields.io/badge/platforms-CTFd%20%7C%20picoCTF%20%7C%20Universal-purple?style=for-the-badge" />
+<img src="https://img.shields.io/badge/version-2.0.0-blue?style=for-the-badge" /> <img src="https://img.shields.io/badge/python-3.8+-blue?style=for-the-badge&logo=python&logoColor=white" /> <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" /> <img src="https://img.shields.io/badge/platforms-CTFd%20%7C%20picoCTF%20%7C%20Universal-purple?style=for-the-badge" /> <img src="https://img.shields.io/github/actions/workflow/status/Shoaib-Bin-Rashid/ctf_scrapper/test.yml?style=for-the-badge&label=tests" />
 
 **One universal tool to download and organize all CTF challenges automatically.**
 
@@ -104,7 +104,9 @@ Options:
   --skip-existing       Skip already downloaded challenges (resume)
   --max-workers N       Concurrent downloads, default: 5
   --timeout N           Request timeout in seconds, default: 30
+  --rate-limit N        Max requests per second, e.g. 2.0 (default: unlimited)
   -v, --verbose         Verbose / debug logging
+  --version             Show version number and exit
   -h, --help            Show help
 ```
 

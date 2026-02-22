@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ctf-scraper"
+version = "2.0.0"
+description = "Universal CTF challenge scraper — auto-detects CTFd, picoCTF, and more"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+authors = [
+  { name = "Shoaib Bin Rashid", email = "shoaibbinrashid11@gmail.com" }
+]
+keywords = ["ctf", "scraper", "security", "ctfd", "picoctf", "hacking"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Security",
+  "Topic :: Internet :: WWW/HTTP",
+]
+dependencies = [
+  "requests>=2.31.0",
+  "beautifulsoup4>=4.12.0",
+  "lxml>=4.9.0",
+  "tqdm>=4.66.0",
+  "playwright>=1.40.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Shoaib-Bin-Rashid/ctf_scrapper"
+"Bug Tracker" = "https://github.com/Shoaib-Bin-Rashid/ctf_scrapper/issues"
+Author = "https://github.com/Shoaib-Bin-Rashid"
+
+[project.scripts]
+ctf-scraper = "ctf_scraper:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = ["ctf_scraper.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

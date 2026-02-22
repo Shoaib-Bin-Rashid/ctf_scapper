@@ -43,3 +43,8 @@ secrets.yaml
 # Backups
 *.backup
 *_backup.py
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage

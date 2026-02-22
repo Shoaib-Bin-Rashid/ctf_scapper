@@ -39,6 +39,7 @@ import json
 import time
 import logging
 import threading
+import platform
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
 from typing import Dict, List, Optional, Tuple
@@ -49,6 +50,39 @@ import argparse
 import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
+
+__version__ = "2.0.0"
+
+# Build a platform-appropriate User-Agent at import time
+_OS_UA = {
+    'Darwin':  'Macintosh; Intel Mac OS X 10_15_7',
+    'Windows': 'Windows NT 10.0; Win64; x64',
+    'Linux':   'X11; Linux x86_64',
+}
+_USER_AGENT = (
+    f"Mozilla/5.0 ({_OS_UA.get(platform.system(), 'X11; Linux x86_64')}) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+class RateLimiter:
+    """Token-bucket rate limiter — limits requests per second across threads."""
+
+    def __init__(self, max_per_second: float):
+        self._min_interval = 1.0 / max_per_second if max_per_second > 0 else 0
+        self._lock = threading.Lock()
+        self._last_call = 0.0
+
+    def wait(self) -> None:
+        """Block until the next request slot is available."""
+        if self._min_interval == 0:
+            return
+        with self._lock:
+            now = time.monotonic()
+            wait = self._min_interval - (now - self._last_call)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_call = time.monotonic()
 
 
 class ScraperState:
@@ -77,7 +111,7 @@ class ScraperState:
             'platform': None
         }
     
-    def save(self):
+    def save(self) -> None:
         """Save state to file"""
         try:
             # Convert sets to lists for JSON serialization
@@ -109,9 +143,10 @@ class ScraperState:
 
 
 class UniversalCTFScraper:
-    def __init__(self, url: str, cookies_str: Optional[str], output_dir: str, 
+    def __init__(self, url: str, cookies_str: Optional[str], output_dir: str,
                  skip_existing: bool = False, dry_run: bool = False,
-                 max_workers: int = 10, timeout: int = 30, verbose: bool = False):
+                 max_workers: int = 5, timeout: int = 30, verbose: bool = False,
+                 rate_limit: float = 0.0):
         self.url = url
         self.output_dir = Path(output_dir)
         self.skip_existing = skip_existing
@@ -119,14 +154,17 @@ class UniversalCTFScraper:
         self.max_workers = max_workers
         self.timeout = timeout
         
-        # Setup logging
+        # Setup logging — use TqdmHandler so log lines don't break the progress bar
+        from tqdm.contrib.logging import logging_redirect_tqdm
+        self._logging_redirect_tqdm = logging_redirect_tqdm
         log_level = logging.DEBUG if verbose else logging.INFO
-        logging.basicConfig(
-            level=log_level,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%H:%M:%S'
-        )
-        self.logger = logging.getLogger(__name__)
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S'))
+        logger = logging.getLogger(__name__)
+        logger.handlers = [handler]
+        logger.setLevel(log_level)
+        logger.propagate = False
+        self.logger = logger
         
         # Initialize session
         self.session = requests.Session()
@@ -143,13 +181,16 @@ class UniversalCTFScraper:
         self.base_url = f"{parsed.scheme}://{parsed.netloc}"
         self.domain = parsed.netloc
         
-        # Set up headers
+        # Set up headers using runtime-detected User-Agent
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
+            'User-Agent': _USER_AGENT,
             'Accept': 'application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Referer': self.base_url,
         })
+
+        # Rate limiter (0 = disabled)
+        self._rate_limiter = RateLimiter(rate_limit)
         
         # State management
         self.state = ScraperState(self.output_dir / '.scraper_state.json')
@@ -256,20 +297,21 @@ class UniversalCTFScraper:
                 return True
 
             # Process challenges concurrently with progress bar
-            with tqdm(total=len(challenges), desc="Overall Progress", unit="chal") as pbar:
-                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                    futures = {
-                        executor.submit(self._process_ctfd_challenge, c): c
-                        for c in challenges
-                    }
-                    for future in as_completed(futures):
-                        result = future.result()
-                        with self._lock:
-                            if result:
-                                self.stats['success'] += 1
-                            else:
-                                self.stats['failed'] += 1
-                        pbar.update(1)
+            with self._logging_redirect_tqdm():
+                with tqdm(total=len(challenges), desc="Progress", unit="chal", dynamic_ncols=True) as pbar:
+                    with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                        futures = {
+                            executor.submit(self._process_ctfd_challenge, c): c
+                            for c in challenges
+                        }
+                        for future in as_completed(futures):
+                            result = future.result()
+                            with self._lock:
+                                if result:
+                                    self.stats['success'] += 1
+                                else:
+                                    self.stats['failed'] += 1
+                            pbar.update(1)
             
             self._print_summary()
             return True
@@ -344,9 +386,10 @@ class UniversalCTFScraper:
             return False
     
     def _fetch_with_retry(self, url: str, max_retries: int = 3) -> Optional[Dict]:
-        """Fetch URL with retry logic"""
+        """Fetch URL with retry logic and optional rate limiting."""
         for attempt in range(max_retries):
             try:
+                self._rate_limiter.wait()
                 resp = self.session.get(url, timeout=self.timeout)
                 resp.raise_for_status()
                 return resp.json()
@@ -388,20 +431,21 @@ class UniversalCTFScraper:
                         self.stats['failed_files'] += 1
     
     def _download_file(self, file_url: str, output_folder: Path) -> bool:
-        """Download a single file with verification"""
+        """Download a single file with progress bar and integrity check."""
         try:
             file_full_url = urljoin(self.base_url, file_url)
             file_name = file_url.split('/')[-1].split('?')[0]
             file_path = output_folder / file_name
-            
+
             # Skip if exists and skip_existing is enabled
             if self.skip_existing and file_path.exists():
                 self.logger.debug(f"     ⏭️  {file_name} (exists)")
                 return True
-            
+
             # Download with retry
             for attempt in range(3):
                 try:
+                    self._rate_limiter.wait()
                     resp = self.session.get(file_full_url, timeout=self.timeout * 2, stream=True)
                     resp.raise_for_status()
                     
@@ -410,15 +454,8 @@ class UniversalCTFScraper:
                     
                     # Download with progress
                     with open(file_path, 'wb') as f:
-                        if total_size > 0:
-                            with tqdm(total=total_size, unit='B', unit_scale=True, 
-                                    desc=f"     {file_name}", leave=False) as pbar:
-                                for chunk in resp.iter_content(chunk_size=8192):
-                                    f.write(chunk)
-                                    pbar.update(len(chunk))
-                        else:
-                            for chunk in resp.iter_content(chunk_size=8192):
-                                f.write(chunk)
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            f.write(chunk)
                     
                     # Verify file size if Content-Length was provided
                     if total_size > 0 and file_path.stat().st_size != total_size:
@@ -488,23 +525,12 @@ class UniversalCTFScraper:
 
         # Fetch remaining pages concurrently
         if total_pages > 1:
-            def fetch_page(page_num):
-                url = urljoin(self.base_url, f'/api/challenges/?page={page_num}')
-                try:
-                    r = self.session.get(url, timeout=self.timeout)
-                    r.raise_for_status()
-                    d = r.json()
-                    if isinstance(d, dict) and 'results' in d:
-                        return page_num, d['results']
-                    elif isinstance(d, list):
-                        return page_num, d
-                except Exception as e:
-                    self.logger.error(f"⚠️  Error on page {page_num}: {e}")
-                return page_num, []
-
             pages_fetched = {1: all_challenges}
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                futures = {executor.submit(fetch_page, p): p for p in range(2, total_pages + 1)}
+                futures = {
+                    executor.submit(self._fetch_picoctf_page, p): p
+                    for p in range(2, total_pages + 1)
+                }
                 for future in as_completed(futures):
                     page_num, results = future.result()
                     pages_fetched[page_num] = results
@@ -530,20 +556,37 @@ class UniversalCTFScraper:
             return True
 
         # --- Step 2: Process challenges concurrently ---
-        with tqdm(total=len(all_challenges), desc="Overall Progress", unit="chal") as pbar:
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                futures = {executor.submit(self._process_picoctf_challenge, c): c for c in all_challenges}
-                for future in as_completed(futures):
-                    result = future.result()
-                    if result:
-                        self.stats['success'] += 1
-                    else:
-                        self.stats['failed'] += 1
-                    pbar.update(1)
+        with self._logging_redirect_tqdm():
+            with tqdm(total=len(all_challenges), desc="Progress", unit="chal", dynamic_ncols=True) as pbar:
+                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    futures = {executor.submit(self._process_picoctf_challenge, c): c for c in all_challenges}
+                    for future in as_completed(futures):
+                        result = future.result()
+                        if result:
+                            self.stats['success'] += 1
+                        else:
+                            self.stats['failed'] += 1
+                        pbar.update(1)
 
         self._print_summary()
         return True
-    
+
+    def _fetch_picoctf_page(self, page_num: int) -> Tuple[int, List[Dict]]:
+        """Fetch a single page of picoCTF challenges from the API."""
+        url = urljoin(self.base_url, f'/api/challenges/?page={page_num}')
+        try:
+            self._rate_limiter.wait()
+            r = self.session.get(url, timeout=self.timeout)
+            r.raise_for_status()
+            d = r.json()
+            if isinstance(d, dict) and 'results' in d:
+                return page_num, d['results']
+            if isinstance(d, list):
+                return page_num, d
+        except Exception as e:
+            self.logger.error(f"⚠️  Error on page {page_num}: {e}")
+        return page_num, []
+
     def _process_picoctf_challenge(self, challenge: Dict) -> bool:
         """Process a single picoCTF challenge"""
         try:
@@ -671,7 +714,7 @@ class UniversalCTFScraper:
             self.logger.debug(f"  ⚠️  Error fetching challenge details from API: {e}")
             return "", [], []
 
-    def _print_summary(self):
+    def _print_summary(self) -> None:
         """Print scraping summary"""
         print(f"\n{'='*60}")
         print("📊 SCRAPING SUMMARY")
@@ -969,9 +1012,9 @@ def get_cookies_securely() -> Optional[str]:
     return None
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description='Ultimate Universal CTF Scraper v2.0',
+        description=f'Ultimate Universal CTF Scraper v{__version__}',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Getting Cookies (EASIEST METHOD ⭐):
@@ -999,47 +1042,53 @@ Examples:
 
   # Resume interrupted download
   %(prog)s "URL" -c "COOKIES" --skip-existing ./output
+
+  # Rate-limited (polite scraping, 2 req/sec)
+  %(prog)s "URL" -c "COOKIES" --rate-limit 2 ./output
         """
     )
-    
+
     parser.add_argument('url', nargs='?', help='CTF platform URL')
     parser.add_argument('output_dir', nargs='?', default='./output', help='Output directory (default: ./output)')
     parser.add_argument('-c', '--cookies', help='Cookies string or @file.txt')
     parser.add_argument('--browser', action='store_true', help='Use browser fallback mode')
     parser.add_argument('--dry-run', action='store_true', help='Preview challenges without downloading')
     parser.add_argument('--skip-existing', action='store_true', help='Skip already downloaded challenges')
-    parser.add_argument('--max-workers', type=int, default=10, help='Max concurrent downloads (default: 10)')
+    parser.add_argument('--max-workers', type=int, default=5, help='Max concurrent downloads (default: 5)')
     parser.add_argument('--timeout', type=int, default=30, help='Request timeout in seconds (default: 30)')
+    parser.add_argument('--rate-limit', type=float, default=0.0, metavar='N',
+                        help='Max requests per second, e.g. 2.0 (default: unlimited)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose logging')
-    
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
+
     args = parser.parse_args()
-    
+
     # Validate arguments
     if not args.url and not args.browser:
         parser.print_help()
         sys.exit(1)
-    
+
     print("\n" + "="*60)
-    print("🎯 ULTIMATE UNIVERSAL CTF SCRAPER v2.0")
+    print(f"🎯 ULTIMATE UNIVERSAL CTF SCRAPER v{__version__}")
     print("="*60)
-    
+
     try:
         # Browser fallback mode
         if args.browser:
             if not args.url:
                 args.url = input("➡️  Enter CTF URL: ").strip()
-            
+
             browser_scraper = BrowserFallbackScraper(args.url, args.output_dir, args.verbose)
             success = browser_scraper.scrape_with_browser()
             sys.exit(0 if success else 1)
-        
+
         # Normal API scraping mode
         cookies = args.cookies or get_cookies_securely()
-        
+
         if not cookies:
             print("\n⚠️  No cookies provided. Attempting without authentication...")
             print("    (This may fail for platforms requiring login)\n")
-        
+
         scraper = UniversalCTFScraper(
             url=args.url,
             cookies_str=cookies,
@@ -1048,11 +1097,12 @@ Examples:
             dry_run=args.dry_run,
             max_workers=args.max_workers,
             timeout=args.timeout,
-            verbose=args.verbose
+            verbose=args.verbose,
+            rate_limit=args.rate_limit,
         )
-        
+
         success = scraper.scrape()
-        
+
         # Offer browser fallback if API scraping failed
         if not success:
             print("\n" + "="*60)
