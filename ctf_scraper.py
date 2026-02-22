@@ -38,7 +38,7 @@ import re
 import json
 import time
 import logging
-import hashlib
+import threading
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
 from typing import Dict, List, Optional, Tuple
@@ -63,7 +63,11 @@ class ScraperState:
         if self.state_file.exists():
             try:
                 with open(self.state_file, 'r') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                # JSON serializes sets as lists — convert back to sets
+                data['completed_challenges'] = set(data.get('completed_challenges', []))
+                data['failed_challenges'] = set(data.get('failed_challenges', []))
+                return data
             except Exception as e:
                 logging.warning(f"Failed to load state: {e}")
         return {
@@ -107,7 +111,7 @@ class ScraperState:
 class UniversalCTFScraper:
     def __init__(self, url: str, cookies_str: Optional[str], output_dir: str, 
                  skip_existing: bool = False, dry_run: bool = False,
-                 max_workers: int = 5, timeout: int = 30, verbose: bool = False):
+                 max_workers: int = 10, timeout: int = 30, verbose: bool = False):
         self.url = url
         self.output_dir = Path(output_dir)
         self.skip_existing = skip_existing
@@ -151,7 +155,6 @@ class UniversalCTFScraper:
         self.state = ScraperState(self.output_dir / '.scraper_state.json')
         
         # Thread safety for stats and state
-        import threading
         self._lock = threading.Lock()
         
         # Statistics
@@ -251,16 +254,22 @@ class UniversalCTFScraper:
                 if len(challenges) > 10:
                     print(f"  ... and {len(challenges) - 10} more")
                 return True
-            
-            # Process challenges with progress bar
+
+            # Process challenges concurrently with progress bar
             with tqdm(total=len(challenges), desc="Overall Progress", unit="chal") as pbar:
-                for challenge in challenges:
-                    result = self._process_ctfd_challenge(challenge)
-                    if result:
-                        self.stats['success'] += 1
-                    else:
-                        self.stats['failed'] += 1
-                    pbar.update(1)
+                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    futures = {
+                        executor.submit(self._process_ctfd_challenge, c): c
+                        for c in challenges
+                    }
+                    for future in as_completed(futures):
+                        result = future.result()
+                        with self._lock:
+                            if result:
+                                self.stats['success'] += 1
+                            else:
+                                self.stats['failed'] += 1
+                        pbar.update(1)
             
             self._print_summary()
             return True
@@ -278,32 +287,34 @@ class UniversalCTFScraper:
             chal_id = str(challenge.get('id'))
             name = challenge.get('name', 'Unknown')
             category = challenge.get('category', 'Misc')
-            
-            # Check if already completed
+
+            # Check if already completed (thread-safe read via lock)
             if self.skip_existing and self.state.is_completed(chal_id):
-                self.stats['skipped'] += 1
+                with self._lock:
+                    self.stats['skipped'] += 1
                 self.logger.debug(f"⏭️  Skipping {name} (already completed)")
                 return True
-            
+
             self.logger.info(f"📥 Processing: {name} ({category})")
-            
+
             # Get detailed challenge info with retry
             detail_data = self._fetch_with_retry(
                 urljoin(self.base_url, f'/api/v1/challenges/{chal_id}')
             )
-            
+
             if not detail_data or not detail_data.get('success'):
                 self.logger.warning(f"  ⚠️  Failed to get details for {name}")
-                self.state.mark_failed(chal_id)
+                with self._lock:
+                    self.state.mark_failed(chal_id)
                 return False
-            
+
             chal_detail = detail_data.get('data', {})
-            
+
             # Create folder structure
             category_folder = self.output_dir / self._sanitize_filename(category)
             challenge_folder = category_folder / self._sanitize_filename(name)
             challenge_folder.mkdir(parents=True, exist_ok=True)
-            
+
             # Save challenge info
             self._save_challenge_info(challenge_folder, {
                 'name': name,
@@ -314,20 +325,22 @@ class UniversalCTFScraper:
                 'tags': chal_detail.get('tags', []),
                 'files': chal_detail.get('files', [])
             })
-            
+
             # Download files concurrently
             files = chal_detail.get('files', [])
             if files:
                 self._download_files_concurrent(files, challenge_folder)
-            
-            self.state.mark_completed(chal_id)
+
+            with self._lock:
+                self.state.mark_completed(chal_id)
             self.logger.info(f"  ✅ Saved to {challenge_folder}")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"  ❌ Error processing challenge: {e}", exc_info=True)
             if 'chal_id' in locals():
-                self.state.mark_failed(chal_id)
+                with self._lock:
+                    self.state.mark_failed(chal_id)
             return False
     
     def _fetch_with_retry(self, url: str, max_retries: int = 3) -> Optional[Dict]:
@@ -658,50 +671,6 @@ class UniversalCTFScraper:
             self.logger.debug(f"  ⚠️  Error fetching challenge details from API: {e}")
             return "", [], []
 
-    def _fetch_picoctf_challenge_details(self, url: str, name: str) -> Tuple[str, List[str], List[str]]:
-        """Fetch full challenge details from HTML page (legacy fallback)"""
-        try:
-            resp = self.session.get(url, timeout=self.timeout)
-            if resp.status_code != 200:
-                self.logger.debug(f"  ⚠️  Could not fetch challenge page (status {resp.status_code})")
-                return "", [], []
-
-            soup = BeautifulSoup(resp.text, 'html.parser')
-
-            # Extract description
-            description = ""
-            desc_elem = soup.find('div', class_='challenge-desc')
-            if not desc_elem:
-                desc_elem = soup.find('div', {'data-testid': 'challenge-description'})
-            if not desc_elem:
-                desc_elem = soup.find('div', class_='description') or soup.find('div', class_='content')
-
-            if desc_elem:
-                description = desc_elem.get_text(separator='\n', strip=True)
-
-            # Extract hints
-            hints = []
-            hint_elems = soup.find_all('div', class_='hint') or soup.find_all('div', {'data-testid': re.compile('hint')})
-            for hint_elem in hint_elems:
-                hint_text = hint_elem.get_text(strip=True)
-                if hint_text:
-                    hints.append(hint_text)
-
-            # Extract file URLs
-            file_urls = []
-            for link in soup.find_all('a', href=True):
-                href = link.get('href')
-                if any(pattern in href for pattern in ['/static/', 'download', '.zip', '.txt', '.tar', '.gz']):
-                    full_url = urljoin(url, href)
-                    if full_url not in file_urls:
-                        file_urls.append(full_url)
-
-            return description, hints, file_urls
-
-        except Exception as e:
-            self.logger.debug(f"  ⚠️  Error fetching challenge details: {e}")
-            return "", [], []
-    
     def _print_summary(self):
         """Print scraping summary"""
         print(f"\n{'='*60}")
@@ -1039,7 +1008,7 @@ Examples:
     parser.add_argument('--browser', action='store_true', help='Use browser fallback mode')
     parser.add_argument('--dry-run', action='store_true', help='Preview challenges without downloading')
     parser.add_argument('--skip-existing', action='store_true', help='Skip already downloaded challenges')
-    parser.add_argument('--max-workers', type=int, default=5, help='Max concurrent downloads (default: 5)')
+    parser.add_argument('--max-workers', type=int, default=10, help='Max concurrent downloads (default: 10)')
     parser.add_argument('--timeout', type=int, default=30, help='Request timeout in seconds (default: 30)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose logging')
     
